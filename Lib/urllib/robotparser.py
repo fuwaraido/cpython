@@ -1,11 +1,8 @@
 """ robotparser.py
-
     Copyright (C) 2000  Bastian Kleineidam
-
     You can choose between two licenses when using this package:
     1) GNU GPLv2
     2) PSF license for Python 2.2
-
     The robots.txt Exclusion Protocol is implemented as specified in
     http://www.robotstxt.org/norobots-rfc.txt
 """
@@ -22,30 +19,28 @@ RequestRate = collections.namedtuple("RequestRate", "requests seconds")
 class RobotFileParser:
     """ This class provides a set of methods to read, parse and answer
     questions about a single robots.txt file.
-
     """
 
-    def __init__(self, url=''):
+    def __init__(self, url='', headers={}):
         self.entries = []
+        self.sitemaps = []
         self.default_entry = None
         self.disallow_all = False
         self.allow_all = False
         self.set_url(url)
         self.last_checked = 0
+        self.headers = headers
 
     def mtime(self):
         """Returns the time the robots.txt file was last fetched.
-
         This is useful for long-running web spiders that need to
         check for new robots.txt files periodically.
-
         """
         return self.last_checked
 
     def modified(self):
         """Sets the time the robots.txt file was last fetched to the
         current time.
-
         """
         import time
         self.last_checked = time.time()
@@ -58,7 +53,10 @@ class RobotFileParser:
     def read(self):
         """Reads the robots.txt URL and feeds it to the parser."""
         try:
-            f = urllib.request.urlopen(self.url)
+            req = urllib.request.Request(self.url)
+            for k in self.headers.keys():
+                req.add_header(k, self.headers[k])
+            f = urllib.request.urlopen(req)
         except urllib.error.HTTPError as err:
             if err.code in (401, 403):
                 self.disallow_all = True
@@ -79,7 +77,6 @@ class RobotFileParser:
 
     def parse(self, lines):
         """Parse the input lines from a robots.txt file.
-
         We allow that a user-agent: line is not preceded by
         one or more blank lines.
         """
@@ -110,7 +107,7 @@ class RobotFileParser:
             line = line.split(':', 1)
             if len(line) == 2:
                 line[0] = line[0].strip().lower()
-                line[1] = urllib.parse.unquote(line[1].strip())
+                line[1] = urllib.parse.unquote(line[1].strip())                
                 if line[0] == "user-agent":
                     if state == 2:
                         self._add_entry(entry)
@@ -141,6 +138,12 @@ class RobotFileParser:
                             and numbers[1].strip().isdigit()):
                             entry.req_rate = RequestRate(int(numbers[0]), int(numbers[1]))
                         state = 2
+                elif line[0] == "sitemap":
+                    # According to http://www.sitemaps.org/protocol.html
+                    # "This directive is independent of the user-agent line,
+                    #  so it doesn't matter where you place it in your file."
+                    # Therefore we do not change the state of the parser.
+                    self.sitemaps.append(line[1])
         if state == 2:
             self._add_entry(entry)
 
@@ -193,11 +196,16 @@ class RobotFileParser:
             return self.default_entry.req_rate
         return None
 
+    def site_maps(self):
+        if not self.sitemaps:
+            return None
+        return self.sitemaps
+
     def __str__(self):
         entries = self.entries
         if self.default_entry is not None:
             entries = entries + [self.default_entry]
-        return '\n'.join(map(str, entries)) + '\n'
+        return '\n\n'.join(map(str, entries))
 
 
 class RuleLine:
@@ -236,7 +244,6 @@ class Entry:
             rate = self.req_rate
             ret.append(f"Request-rate: {rate.requests}/{rate.seconds}")
         ret.extend(map(str, self.rulelines))
-        ret.append('')  # for compatibility
         return '\n'.join(ret)
 
     def applies_to(self, useragent):
